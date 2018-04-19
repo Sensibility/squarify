@@ -16,6 +16,17 @@ class Area(typing.NamedTuple):
 	>>> -Area(16, 9)
 	Area(width=9, height=16)
 
+	You can add or subtract dimensions from an Area, and combining two areas in this way does NOT
+	add/subtract the area of one to the other (somewhat confusingly). This would difficult to do in
+	a sensible way since areas *must* be integers, but have no forced aspect ratio. Consider trying
+	to add a 2x2 square to a 1x3 rectangle. The resulting width and height cannot maintain the
+	aspect ratio of either initial area while retaining integral values.
+	>>> Area(1,1) + (1,1)
+	Area(width=2, height=2)
+	>>> (5, 7) - Area(2, 2)
+	Area(width=3, height=5)
+
+
 	This type interacts with numeric types in the following ways:
 
 	Multiplying by integers scales the area's size (rounds width/height to integers)
@@ -61,13 +72,45 @@ class Area(typing.NamedTuple):
 		"""
 		return all(self)
 
+	def __add__(self, other: object) -> object:
+		"""
+		Implements `self + other`
+		"""
+		if isinstance(other, tuple) and len(other) == 2 and all(isinstance(a, int) for a in other):
+			return type(self)(other[0] + self.width, other[1] + self.height)
+		return NotImplemented
+
+	def __radd__(self, other: object) -> object:
+		"""
+		Implements `other + self`
+		"""
+		if isinstance(other, tuple) and len(other) == 2 and all(isinstance(a, int) for a in other):
+			return type(self)(other[0] + self.width, other[1] + self.height)
+		return NotImplemented
+
+	def __sub__(self, other: object) -> object:
+		"""
+		Implements `self - other`
+		"""
+		if isinstance(other, tuple) and len(other) == 2 and all(isinstance(a, int) for a in other):
+			return type(self)(self.width - other[0],  self.height - other[1])
+		return NotImplemented
+
+	def __rsub__(self, other: object) -> object:
+		"""
+		Implements `other + self`
+		"""
+		if isinstance(other, tuple) and len(other) == 2 and all(isinstance(a, int) for a in other):
+			return type(self)(other[0] - self.width, other[1] - self.height)
+		return NotImplemented
+
 	def __mul__(self, other: object) -> object:
 		"""
 		Implements `self * other`
 		"""
 		if isinstance(other, int):
 			toMult = other**0.5
-			return type(self)(int(self.width * toMult), self.height * toMult)
+			return type(self)(int(self.width * toMult), int(self.height * toMult))
 		if isinstance(other, float):
 			return other * self.width * self.height
 		return NotImplemented
@@ -286,6 +329,9 @@ class Rect(typing.NamedTuple):
 def normalize_sizes(sizes: typing.List[float], areaOrDX: typing.Union[Area, int], dy: int=None) -> typing.List[float]:
 	"""
 	Normalizes the `sizes` with respect to an area of size `dx`x`dy`
+
+	>>> normalize_sizes([50, 10, 1], (1920, 1080))
+	[1699448.1311475409, 339876.47540983604, 33993.44262295082]
 	"""
 	area = Area(areaOrDX, dy) if dy else Area(*areaOrDX)
 
@@ -311,8 +357,9 @@ def layoutrow(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[R
 	width = sum(sizes) / area.height
 	rects = []
 	for size in sizes:
-		rects.append(Rect(pt, Area(area.width, size / width)))
-		pt = pt + Point(pt.x, pt.y + size / width)
+		adjust = (0, int(size/width))
+		rects.append(Rect(pt, Area(area.width, 0) + adjust))
+		pt +=  adjust
 	return rects
 
 def layoutcol(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[Rect]:
@@ -323,8 +370,9 @@ def layoutcol(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[R
 	height = sum(sizes) / area.width
 	rects = []
 	for size in sizes:
-		rects.append(Rect(pt, Area(size / height, area.height)))
-		pt = pt + Point(pt.x + size/height, pt.y)
+		adjust = (int(size/height), 0)
+		rects.append(Rect(pt, Area(0, area.height)+adjust))
+		pt += adjust
 	return rects
 
 def layout(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[Rect]:
@@ -332,22 +380,22 @@ def layout(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[Rect
 
 def leftoverrow(sizes: typing.List[float], pt: Point, area: Area) -> Rect:
 	# compute remaining area when dx >= dy
-	width = sum(sizes) / area.height
+	width = int(sum(sizes) / area.height)
 	leftoverPT = pt + (width, 0)
-	leftoverArea = Area(area.width - width, area.height)
+	leftoverArea = area - (width, 0)
 	return Rect(leftoverPT, leftoverArea)
 
 def leftovercol(sizes: typing.List[float], pt: Point, area: Area) -> Rect:
 	# compute remaining area when dx >= dy
-	height = sum(sizes) / area.width
+	height = int(sum(sizes) / area.width)
 	leftoverPT = pt + (0, height)
-	leftoverArea = Area(area.width, area.height - height)
+	leftoverArea = area - (0, height) 
 	return Rect(leftoverPT, leftoverArea)
 
 def leftover(sizes: typing.List[float], pt: Point, area: Area) -> Rect:
 	return leftoverrow(sizes, pt, area) if area.width >= area.height else leftovercol(sizes, pt, area)
 
-def worstRatio(sizes: typing.List[float], pt: Point, area: Area):
+def worstRatio(sizes: typing.List[float], pt: Point, area: Area) -> float:
 	return max([max(rect.width / rect.height, rect.height / rect.width) for rect in layout(sizes, pt, area)])
 
 def squarify(sizes: typing.List[float],
@@ -356,8 +404,11 @@ def squarify(sizes: typing.List[float],
              areaOrDX: typing.Union[Area, int] = None,
              dy: int = None) -> typing.List[Rect]:
 	"""
-	Returns a list of squarified `size`s that fit in the rectangle `area`
+	Returns a list of squarified `Rect`s with sizes `sizes` that fit in the rectangle `area`
 	with top-left corner at `pt`.
+
+	>>> squarify([1699448.1311475409, 339876.47540983604, 33993.44262295082], (0,0), (1920, 1080))
+	[Rect(topleft=Point(x=0, y=0), area=Area(width=1920, height=1080)), Rect(topleft=Point(x=1573, y=0), area=Area(width=347, height=1080)), Rect(topleft=Point(x=1573, y=979), area=Area(width=347, height=101))]
 	"""
 
 	if not areaOrDX:
@@ -389,11 +440,7 @@ def squarify(sizes: typing.List[float],
 	remaining = sizes[i:]
 	
 	leftoverPT, leftoverArea = leftover(current, pt, area)
-	ret = layout(current, pt, area)
-	if ret is None:
-		raise Exception()
-	remainder = squarify(remaining, leftoverPT, leftoverArea)
-	return ret.extend(remainder) if remainder else ret
+	return layout(current, pt, area) + squarify(remaining, leftoverPT, leftoverArea)
 
 def padded_squarify(sizes, x, y, dx=None, dy=None):
 	return [pad_rectangle(rect) for rect in squarify(sizes, x, y, dx, dy)]
