@@ -117,13 +117,40 @@ class Area(typing.NamedTuple):
 
 		return self @ other
 
+class Point(typing.NamedTuple):
+	"""
+	A class that represents a point in 2D space.
+	"""
 
-def normalize_sizes(sizes: typing.List[float], area: Area) -> typing.List[float]:
+	x: int
+	y: int
+
+	def __str__(self) -> str:
+		"""
+		Implements `str(self)`
+		"""
+		return "(%d, %d)" % self
+
+	def __add__(self, other):
+		"""
+		Implements `self + other`
+		"""
+		return type(self)(self.width+other.width, self.height+other.height)
+
+	def __sub__(self, other):
+		"""
+		Implements `self - other`
+		"""
+		return type(self)(self.width-other.width, self.height-other.height)
+
+def normalize_sizes(sizes: typing.List[float], areaOrDX: typing.Union[Area, int], dy: int=None) -> typing.List[float]:
 	"""
 	Normalizes the `sizes` with respect to an area of size `dx`x`dy`
 	"""
-	total_size = sum(sizes)
-	return [size * area / total_size for size in sizes]
+	area = Area(areaOrDX, dy) if dy else areaOrDX
+
+	totalSize = sum(sizes)
+	return [size * area / totalSize for size in sizes]
 
 def pad_rectangle(rect):
 	if rect['dx'] > 2:
@@ -133,17 +160,19 @@ def pad_rectangle(rect):
 		rect['y'] += 1
 		rect['dy'] -= 2
 
-def layoutrow(sizes, x, y, dx, dy):
+def layoutrow(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[typing.Tuple[Point, Area]]:
+	"""
+	Lays out a row
+	"""
 	# generate rects for each size in sizes
 	# dx >= dy
 	# they will fill up height dy, and width will be determined by their area
 	# sizes should be pre-normalized wrt dx * dy (i.e., they should be same units)
-	covered_area = sum(sizes)
-	width = covered_area / dy
+	width = sum(sizes) / area.height
 	rects = []
 	for size in sizes:
-		rects.append({'x': x, 'y': y, 'dx': width, 'dy': size / width})
-		y += size / width
+		rects.append((pt, Area(area.width, size / width)))
+		pt = pt + Point(pt.x, pt.y + size / width)
 	return rects
 
 def layoutcol(sizes, x, y, dx, dy):
@@ -185,15 +214,29 @@ def leftovercol(sizes, x, y, dx, dy):
 def leftover(sizes, x, y, dx, dy):
 	return leftoverrow(sizes, x, y, dx, dy) if dx >= dy else leftovercol(sizes, x, y, dx, dy)
 
-def worst_ratio(sizes, x, y, dx, dy):
+def worst_ratio(sizes: typing.List[float], x: int, y: int, dx: int, dy: int):
 	return max([max(rect['dx'] / rect['dy'], rect['dy'] / rect['dx']) for rect in layout(sizes, x, y, dx, dy)])
 
-def squarify(sizes: typing.List[float], x: int, y: int, dx: int, dy: int) -> \
-											  typing.List[typing.Tuple[float, float, float, float]]:
+def squarify(sizes: typing.List[float],
+             PTorX: typing.Union[Point, int],
+             areaOrY: typing.Union[Area, int],
+             areaOrDX: typing.Union[Area, int] = None,
+             dy: int = None) -> typing.List[typing.Tuple[float, float, float, float]]:
 	"""
-	Returns a list of squarified `size`s that fit in the rectangle of size `dx`x`dy`
-	with top-left corner at (`x`, `y`)
+	Returns a list of squarified `size`s that fit in the rectangle `area`
+	with top-left corner at `pt`.
 	"""
+
+	if not areaOrDX:
+		pt = PTorX
+		area = areaOrY
+	elif not dy:
+		pt = Point(PTorX, areaOrY)
+		area = areaOrDX
+	else:
+		pt = Point(PTorX, areaOrY)
+		area = Area(areaOrDX, dy)
+
 
 	# sizes should be pre-normalized wrt dx * dy (i.e., they should be same units)
 	# or dx * dy == sum(sizes)
@@ -203,24 +246,20 @@ def squarify(sizes: typing.List[float], x: int, y: int, dx: int, dy: int) -> \
 		return []
 	
 	if len(sizes) == 1:
-		return layout(sizes, x, y, dx, dy)
+		return layout(sizes, pt, area)
 	
 	# figure out where 'split' should be
-	i = 1
-	while i < len(sizes) and worst_ratio(sizes[:i], x, y, dx, dy) >= worst_ratio(sizes[:(i+1)], x, y, dx, dy):
-		i += 1
+	for i in range(1, len(sizes)):
+		if worst_ratio(sizes[:i], pt, area) < worst_ratio(sizes[:(i+1)], pt, area):
+			break
 	current = sizes[:i]
 	remaining = sizes[i:]
 	
-	(leftover_x, leftover_y, leftover_dx, leftover_dy) = leftover(current, x, y, dx, dy)
-	return layout(current, x, y, dx, dy) + \
-			squarify(remaining, leftover_x, leftover_y, leftover_dx, leftover_dy)
+	leftoverPT, leftoverArea = leftover(current, pt, area)
+	return layout(current, pt, area) + squarify(remaining, leftoverPT, leftoverA)
 
-def padded_squarify(sizes, x, y, dx, dy):
-	rects = squarify(sizes, x, y, dx, dy)
-	for rect in rects:
-		pad_rectangle(rect)
-	return rects
+def padded_squarify(sizes, x, y, dx=None, dy=None):
+	return [pad_rectangle(rect) for rect in squarify(sizes, x, y, dx, dy)]
 
 def plot(sizes, norm_x=100, norm_y=100,
 		 color=None, label=None, value=None,
