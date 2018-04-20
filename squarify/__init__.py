@@ -339,11 +339,11 @@ def normalize_sizes(sizes: typing.List[float], areaOrDX: typing.Union[Area, int]
 	return [size * area / totalSize for size in sizes]
 
 def pad_rectangle(rect):
-	if rect['dx'] > 2:
-		rect['x'] += 1
-		rect['dx'] -= 2
-	if rect['dy'] > 2:
-		rect['y'] += 1
+	if rect.width > 2:
+		rect.topleft += (1, 0)
+		rect.area -= (2, 0)
+	if rect.height > 2:
+		rect.topleft += (0, 1)
 		rect['dy'] -= 2
 
 def layoutrow(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[Rect]:
@@ -357,7 +357,7 @@ def layoutrow(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[R
 	width = sum(sizes) / area.height
 	rects = []
 	for size in sizes:
-		adjust = (0, int(size/width))
+		adjust = (0, max(int(size/width), 1))
 		rects.append(Rect(pt, Area(area.width, 0) + adjust))
 		pt +=  adjust
 	return rects
@@ -370,7 +370,7 @@ def layoutcol(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[R
 	height = sum(sizes) / area.width
 	rects = []
 	for size in sizes:
-		adjust = (int(size/height), 0)
+		adjust = (max(int(size/height), 1), 0)
 		rects.append(Rect(pt, Area(0, area.height)+adjust))
 		pt += adjust
 	return rects
@@ -421,7 +421,11 @@ def squarify(sizes: typing.List[float],
 		pt = Point(PTorX, areaOrY)
 		area = Area(areaOrDX, dy)
 
+	sizes = normalize_sizes(sorted(sizes, reverse=True), area)
 
+	return _squarify(sizes, pt, area)
+
+def _squarify(sizes: typing.List[float], pt: Point, area: Area) -> typing.List[Rect]:
 	# sizes should be pre-normalized wrt dx * dy (i.e., they should be same units)
 	# or dx * dy == sum(sizes)
 	# sizes should be sorted biggest to smallest
@@ -440,7 +444,7 @@ def squarify(sizes: typing.List[float],
 	remaining = sizes[i:]
 	
 	leftoverPT, leftoverArea = leftover(current, pt, area)
-	return layout(current, pt, area) + squarify(remaining, leftoverPT, leftoverArea)
+	return layout(current, pt, area) + _squarify(remaining, leftoverPT, leftoverArea)
 
 def padded_squarify(sizes, x, y, dx=None, dy=None):
 	return [pad_rectangle(rect) for rect in squarify(sizes, x, y, dx, dy)]
